@@ -6,6 +6,7 @@
 mod fb;
 mod ink;
 mod oracle;
+mod pen;
 mod qtfb;
 mod script;
 
@@ -67,8 +68,19 @@ fn run() -> std::io::Result<()> {
     let font = FontRef::try_from_slice(FONT_TTF).map_err(std::io::Error::other)?;
 
     let mut client = qtfb::QtfbClient::connect(key, qtfb::FBFMT_RMPP_RGB565, SCREEN_W, SCREEN_H, 2)?;
-    // FAST waveform: pen ink needs the low-latency path (1s server stall, once).
-    let _ = client.set_refresh_mode(qtfb::REFRESH_MODE_FAST);
+    // UFAST waveform: the lowest-latency e-ink path, made for live ink
+    // (1s server-side stall on this call, once at startup).
+    let _ = client.set_refresh_mode(qtfb::REFRESH_MODE_UFAST);
+
+    // Raw digitizer: full pressure/tilt/eraser at hardware rate. Grabbed so
+    // xochitl ignores the pen while the diary is open.
+    let mut pen_dev = match pen::PenDevice::open() {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!("riddle: raw pen unavailable ({e}), falling back to qtfb pen events");
+            None
+        }
+    };
 
     let sigterm = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&sigterm))?;
@@ -81,6 +93,12 @@ fn run() -> std::io::Result<()> {
     let mut user_ink = ink::Ink::new();
     let mut state = State::Listening { last_pen: None };
     let mut pen_down = false;
+    // Ink updates are coalesced: draw into the framebuffer immediately, but
+    // flush at most one partial update per interval so the Qt queue never
+    // backs up behind us.
+    let mut ink_dirty = BBox::empty();
+    let mut last_flush = Instant::now();
+    const FLUSH_EVERY: Duration = Duration::from_millis(35);
 
     eprintln!("riddle: the diary is open (key {key})");
 
@@ -89,26 +107,68 @@ fn run() -> std::io::Result<()> {
             break;
         }
 
-        // ---- input ----
+        // ---- raw pen (preferred path) ----
+        if let Some(ref mut pdev) = pen_dev {
+            for s in pdev.drain() {
+                let writing = s.touching && s.pressure > 40;
+                if !writing {
+                    if pen_down {
+                        pen_down = false;
+                        user_ink.pen_up();
+                        if let State::Listening { ref mut last_pen } = state {
+                            *last_pen = Some(Instant::now());
+                        }
+                    }
+                    continue;
+                }
+                match state {
+                    State::Listening { ref mut last_pen } => {
+                        pen_down = true;
+                        let fbuf = client.framebuffer();
+                        let d = match s.tool {
+                            pen::Tool::Pen => {
+                                // Quill: 2..5px with real 0..4096 pressure.
+                                let r = 2 + s.pressure * 3 / pen::MAX_PRESSURE;
+                                user_ink.pen_point(fbuf, s.x, s.y, r)
+                            }
+                            pen::Tool::Eraser => user_ink.erase_point(fbuf, s.x, s.y, 22),
+                        };
+                        if !d.is_empty() {
+                            ink_dirty.add(d.x0, d.y0, 0);
+                            ink_dirty.add(d.x1, d.y1, 0);
+                        }
+                        *last_pen = Some(Instant::now());
+                    }
+                    State::Lingering { region, .. } => {
+                        state = State::FadingReply { stage: 0, next: Instant::now(), region };
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // ---- qtfb events: touch/close, plus pen fallback ----
         let events = match client.drain_events() {
             Ok(v) => v,
             Err(_) => break, // window closed
         };
         for ev in events {
+            if pen_dev.is_some() {
+                continue; // raw path owns the pen; nothing else used
+            }
             match ev.input_type {
                 qtfb::INPUT_PEN_PRESS | qtfb::INPUT_PEN_UPDATE => {
-                    // The pen only writes while the diary listens.
                     if let State::Listening { ref mut last_pen } = state {
                         pen_down = true;
                         let fbuf = client.framebuffer();
-                        if let Some((x, y, w, h)) = user_ink.pen_point(fbuf, ev.x, ev.y, ev.d) {
-                            let _ = client.update_partial(x, y, w, h);
+                        let r = 2 + ev.d.clamp(0, 100) / 45;
+                        let d = user_ink.pen_point(fbuf, ev.x, ev.y, r);
+                        if !d.is_empty() {
+                            ink_dirty.add(d.x0, d.y0, 0);
+                            ink_dirty.add(d.x1, d.y1, 0);
                         }
                         *last_pen = Some(Instant::now());
-                    } else if let State::Lingering { ref region, .. } = state {
-                        // Writing again interrupts the linger: swallow the
-                        // reply quickly so the page is theirs.
-                        let region = *region;
+                    } else if let State::Lingering { region, .. } = state {
                         state = State::FadingReply { stage: 0, next: Instant::now(), region };
                     }
                 }
@@ -123,6 +183,14 @@ fn run() -> std::io::Result<()> {
                 }
                 _ => {} // touch ignored: the diary knows a hand from a quill
             }
+        }
+
+        // ---- coalesced ink flush ----
+        if !ink_dirty.is_empty() && last_flush.elapsed() >= FLUSH_EVERY {
+            let (x, y, w, h) = ink_dirty.rect();
+            let _ = client.update_partial(x, y, w, h);
+            ink_dirty = BBox::empty();
+            last_flush = Instant::now();
         }
 
         // ---- state machine ----
@@ -274,7 +342,7 @@ fn run() -> std::io::Result<()> {
             }
         };
 
-        std::thread::sleep(Duration::from_millis(4));
+        std::thread::sleep(Duration::from_millis(2));
     }
 
     eprintln!("riddle: the diary closes");

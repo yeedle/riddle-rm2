@@ -7,12 +7,13 @@ pub struct Ink {
     /// Finished strokes as point lists (x, y, radius).
     strokes: Vec<Vec<(i32, i32, i32)>>,
     current: Vec<(i32, i32, i32)>,
+    last_erase: Option<(i32, i32)>,
     pub bbox: BBox,
 }
 
 impl Ink {
     pub fn new() -> Self {
-        Self { strokes: Vec::new(), current: Vec::new(), bbox: BBox::empty() }
+        Self { strokes: Vec::new(), current: Vec::new(), last_erase: None, bbox: BBox::empty() }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -22,13 +23,13 @@ impl Ink {
     pub fn clear(&mut self) {
         self.strokes.clear();
         self.current.clear();
+        self.last_erase = None;
         self.bbox = BBox::empty();
     }
 
-    /// Pen touched down or moved while down. `pressure` is qtfb's 0..100.
-    /// Returns the dirty rect of what was drawn.
-    pub fn pen_point(&mut self, fb_buf: &mut [u8], x: i32, y: i32, pressure: i32) -> Option<(i32, i32, i32, i32)> {
-        let r = 2 + (pressure.clamp(0, 100)) / 45; // 2..4 px quill width
+    /// Pen touched down or moved while down, with brush radius already
+    /// resolved by the caller. Returns the dirty rect of what was drawn.
+    pub fn pen_point(&mut self, fb_buf: &mut [u8], x: i32, y: i32, r: i32) -> BBox {
         let mut dirty = BBox::empty();
         if let Some(&(px, py, pr)) = self.current.last() {
             fb::brush_line(fb_buf, px, py, x, y, r.min(pr + 1), fb::BLACK);
@@ -39,13 +40,28 @@ impl Ink {
         dirty.add(x, y, r + 2);
         self.current.push((x, y, r));
         self.bbox.add(x, y, r + 2);
-        Some(dirty.rect())
+        dirty
+    }
+
+    /// Eraser tip: brush white over the page.
+    pub fn erase_point(&mut self, fb_buf: &mut [u8], x: i32, y: i32, r: i32) -> BBox {
+        let mut dirty = BBox::empty();
+        if let Some((px, py)) = self.last_erase {
+            fb::brush_line(fb_buf, px, py, x, y, r, fb::WHITE);
+            dirty.add(px, py, r + 2);
+        } else {
+            fb::stamp(fb_buf, x, y, r, fb::WHITE);
+        }
+        dirty.add(x, y, r + 2);
+        self.last_erase = Some((x, y));
+        dirty
     }
 
     pub fn pen_up(&mut self) {
         if !self.current.is_empty() {
             self.strokes.push(std::mem::take(&mut self.current));
         }
+        self.last_erase = None;
     }
 
     /// Rasterize the ink region to a grayscale PNG for the oracle.
