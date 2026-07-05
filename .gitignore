@@ -1,0 +1,4 @@
+riddle/target/
+quill/build/
+quill/vendor/
+*.log
