@@ -15,7 +15,15 @@ If that sounds like a lot, it isn't — **[remagic](https://github.com/maximeriv
 walks you through turning on developer mode and sets up everything with one
 command. Come back here, drop riddle in, and start writing to Tom.
 
-Already have xovi + AppLoad? Skip to [Building](#building).
+Already have xovi + AppLoad? **[Download the latest release](https://github.com/MaximeRivest/riddle/releases/latest)** — a ready-to-drop bundle, no compiler needed — or [build from source](#building).
+
+### Install the prebuilt bundle
+
+1. Grab `riddle-appload-aarch64.zip` from the [latest release](https://github.com/MaximeRivest/riddle/releases/latest) and unzip it.
+2. Copy the folder to your tablet:
+   `scp -O -r riddle root@10.11.99.1:/home/root/xovi/exthome/appload/`
+3. Add an API key: `cp oracle.env.example oracle.env` in that folder and put your `RIDDLE_OPENAI_KEY` in it (any OpenAI-compatible key). Or skip it to use [pi](#option-b--pi-the-power-path).
+4. In **AppLoad**: tap **Reload**, then **The Diary**. Write, and rest your pen.
 
 > ⚠️ **This modifies your device.** It runs as root, stops the vendor UI
 > (in takeover mode), and drives the e-ink engine directly. It has only been
