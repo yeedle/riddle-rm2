@@ -73,4 +73,12 @@ $CXX -O2 \
     -Wl,-rpath,/home/root/quill \
     -o build/gif_demo
 
-echo "built: build/libquill.so build/scribble build/map_demo build/image_demo build/image_anim_demo build/gif_demo"
+# drawlab: no-AI live drawing experiments.
+$CC -O2 src/drawlab.c \
+    -L build -lquill \
+    -L vendor -lqsgepaper \
+    -lQt6Gui -lQt6Core -lstdc++ \
+    -Wl,-rpath,/home/root/quill \
+    -o build/drawlab
+
+echo "built: build/libquill.so build/scribble build/map_demo build/image_demo build/image_anim_demo build/gif_demo build/drawlab"
