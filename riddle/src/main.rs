@@ -37,7 +37,7 @@ const PNG_PATH: &str = "/tmp/riddle-page.png";
 const IDLE_COMMIT: Duration = Duration::from_millis(2800);
 /// How long the diary waits on a silent oracle before giving up on the turn.
 /// Generous: thinking models can lead with a long silence.
-const ORACLE_PATIENCE: Duration = Duration::from_secs(120);
+const ORACLE_PATIENCE: Duration = Duration::from_secs(300);
 const REPLY_PX: f32 = 96.0;
 const MARGIN_X: i32 = 120;
 
