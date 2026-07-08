@@ -106,8 +106,10 @@ impl Ink {
 
     /// Rasterize the ink region to a grayscale PNG for the oracle.
     /// Crops to the ink bounding box and box-downscales so the long side stays
-    /// ≤ 800px (at least 2x): the model reads handwriting fine at that scale,
-    /// and image pixels are the dominant vision-token / latency cost.
+    /// ≤ `RIDDLE_ORACLE_MAX_DIM` px (default 800, at least 2x): the model reads
+    /// handwriting fine at that scale, and image pixels are the dominant
+    /// vision-token / latency cost. Lower the cap (e.g. 640/512) to speed up a
+    /// slow CPU-only backend at some cost to OCR of fine handwriting.
     pub fn to_png(&self, surf: &Surface, path: &str) -> std::io::Result<()> {
         if self.bbox.is_empty() {
             return Err(std::io::Error::other("no ink"));
@@ -117,7 +119,15 @@ impl Ink {
         let y0 = (by - 20).max(0) as usize;
         let x1 = ((bx + bw + 20) as usize).min(surf.w);
         let y1 = ((by + bh + 20) as usize).min(surf.h);
-        let f = ((x1 - x0).max(y1 - y0)).div_ceil(800).max(2);
+        // Long-side pixel cap on the image sent to the oracle. Fewer pixels =
+        // fewer vision tokens = lower latency (matters most on CPU-only Ollama),
+        // traded against OCR of fine handwriting. Tunable without a rebuild.
+        let max_dim = std::env::var("RIDDLE_ORACLE_MAX_DIM")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&v| v > 0)
+            .unwrap_or(800);
+        let f = ((x1 - x0).max(y1 - y0)).div_ceil(max_dim).max(2);
         let (w, h) = ((x1 - x0) / f, (y1 - y0) / f);
 
         let mut gray = vec![0u8; w * h];
