@@ -6,6 +6,8 @@ quill/vendor/
 # never commit a real API key
 riddle/oracle.env
 oracle.env
+riddle/oracle.env.ollama
+riddle/oracle.env.openai
 riddle/dist/
 drawlab/dist/
 home/dist/
