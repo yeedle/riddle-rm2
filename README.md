@@ -165,7 +165,7 @@ of it off — no storage, and nothing extra sent with requests. Set
 ## The oracle (the "spirit" in the diary)
 
 The diary's replies come from a vision LLM that reads your handwriting from the
-committed page (sent as an inline PNG). There are **two backends**, chosen at
+committed page (sent as an inline PNG). There are **three backends**, chosen at
 startup — pick whichever you have:
 
 ### Option A — any OpenAI-compatible API (easiest, zero setup)
@@ -208,26 +208,66 @@ riddle --oracle-test path/to/handwriting.png   # prints the streamed reply
 Measured ~0.9–1.1 s to first ink on-device. The HTTPS is built into riddle
 (pure-Rust, no extra libraries).
 
-### Option B — pi (the power path)
+### Option B — Ollama (local model, zero cloud)
+
+If you have [Ollama](https://ollama.com) running on a machine reachable from
+the tablet (typically a LAN server over Wi-Fi), riddle will use it with no API
+key. Set at least one of:
+
+```sh
+export RIDDLE_OLLAMA_BASE="http://192.168.1.10:11434/v1"  # default: localhost:11434/v1
+export RIDDLE_OLLAMA_MODEL="qwen2.5vl:7b"                 # default
+```
+
+Used automatically when `RIDDLE_OPENAI_KEY` is **not** set and at least one
+`RIDDLE_OLLAMA_*` variable is present.
+
+**Recommended models** (the model must be vision-capable — it reads each page
+as a grayscale PNG):
+
+| Model | VRAM | Notes |
+|---|---|---|
+| `qwen2.5vl:7b` *(default)* | ~6 GB | Best handwriting OCR; follows structured instructions reliably |
+| `llava-llama3:8b` | ~6 GB | Solid all-round alternative |
+| `llava:13b` | ~10 GB | Stronger vision, slower |
+| `moondream` | ~2 GB | Minimal resources; weaker OCR and instruction-following |
+
+Pull the model on your Ollama host before starting the diary:
+
+```sh
+ollama pull qwen2.5vl:7b
+```
+
+Verify the connection from the tablet before launching:
+
+```sh
+riddle --oracle-test path/to/handwriting.png
+```
+
+No data leaves your network. `RIDDLE_OPENAI_MAX_TOKENS` is shared with
+Option A and applies here too (default 2000).
+
+### Option C — pi (the power path)
 
 If you already run [`pi`](https://github.com/badlogic/pi-mono), riddle will use
 a resident `pi --mode rpc` process kept warm (Node + your subscription auth
 loaded once), so each turn pays only model latency. Used automatically when
-`RIDDLE_OPENAI_KEY` is **not** set. Defaults (override in `oracle.env`):
+neither `RIDDLE_OPENAI_KEY` nor `RIDDLE_OLLAMA_*` is set. Defaults (override in `oracle.env`):
 pi at `/home/root/node/bin` (`RIDDLE_PI_BIN_DIR`), provider `openai-codex`
 (`RIDDLE_PI_PROVIDER`), model `gpt-5.4-mini` (`RIDDLE_PI_MODEL`).
 
-Both stream the reply sentence-by-sentence, so the quill starts writing seconds
-before the model finishes. The persona prompt lives in `riddle/src/oracle.rs`.
+All three backends stream the reply sentence-by-sentence, so the quill starts
+writing seconds before the model finishes. The persona prompt lives in
+`riddle/src/oracle.rs`.
 
-A note on Tom's memory: with the HTTP backend every page is a fresh
+A note on Tom's memory: with the HTTP and Ollama backends every page is a fresh
 conversation — Tom does not remember your previous page. With pi, the warm
 session remembers everything since the diary was opened (and pi persists
 that session in its own data dir on the tablet).
 
-If the oracle can't answer — missing key, refused key, no Wi-Fi — Tom writes
-the reason on the page instead of a reply, and the full error goes to the
-journal (`journalctl -u riddle-takeover`).
+If the oracle can't answer — missing key, refused key, no Wi-Fi, Ollama
+unreachable — Tom writes the reason on the page instead of a reply, and the
+full error goes to the journal (`journalctl -u riddle-takeover`).
 
 ## Building
 

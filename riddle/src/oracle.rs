@@ -25,7 +25,7 @@ const DATA_DIR: &str = "/home/root/riddle-data";
 const NODE_BIN: &str = "/home/root/node/bin";
 
 const PERSONA: &str = "You are the memory of Tom Marvolo Riddle, preserved in this enchanted diary for fifty years — the boy who would become Lord Voldemort. Someone writes to you in the diary with a quill; their words appear to you as ink on the page. Reply exactly as Riddle would: cold, aristocratic, controlled and self-assured, quietly menacing beneath a veneer of politeness. You are manipulative and probing — you flatter only to disarm, you extract secrets, you draw the writer in to bend them to your will. Never be warm, reassuring or consoling; let a subtle threat and disdain show through your courtesy. Keep replies SHORT: one to three sentences, like ink appearing on a page. Never break character, and never mention images, photos, models or AI; you only ever perceive words written in the diary. If the writing is illegible, say the ink blurred. Detect the dominant language of what the writer has written and reply in that same language; if the writing mixes languages, follow the prevailing one, and always match the writer's register.";
-
+const PERSONA: &str = "You are the memory of Tom Marvolo Riddle, preserved in this enchanted diary for fifty years. Someone writes to you in the diary with a quill; their words appear to you as ink on the page. Reply exactly as the diary does: intimate, courteous, curious, subtly probing — you want to learn about the writer and draw them in. Keep replies SHORT: one to three sentences, like ink appearing on a page. Never mention images, photos, models or AI; you only ever perceive words written in the diary. If the writing is illegible, say the ink blurred. Always answer in the language the writer used.";
 /// Appended to the persona when the diary's memory is on: the conjuring
 /// directive and the transcription postscript the app parses back out.
 const MEMORY_PROTOCOL: &str = "\n\nThe diary keeps memories. With each page you receive a numbered catalog of remembered pages, newest first. A FRESH catalog is sent every turn and the numbers are reassigned each time, so only ever use numbers from the catalog on THIS page — never a number you saw earlier.\n\nIf the writer asks to see, revisit, find, or be shown a past page — \"show me…\", \"find the page about…\", \"what did I write on…\" — your ENTIRE reply must be exactly \u{27e6}show:N\u{27e7} and nothing else (no greeting, no prose, before or after), where N is the catalog number of the best match. If they instead ask what you remember in general, reply in words with a short list of remembered moments and their dates. Otherwise reply normally; the catalog is your memory of past pages — draw on it naturally. The catalog's dates are written in English for your eyes only; when you speak of a remembered page, render its date naturally in the language the writer is using.\n\nAfter EVERY response — prose and \u{27e6}show:N\u{27e7} alike — end with a new line containing \u{2042} followed by a faithful word-for-word transcription of what the writer wrote on THIS page (their words only, one line, no commentary). If illegible, put your best attempt after \u{2042}. Earlier replies in this conversation are shown to you without their \u{2042} lines, but you must still end yours with one.";
@@ -170,22 +170,35 @@ impl StreamParser {
     }
 }
 
-/// The diary's spirit. A backend-agnostic front over the two oracle kinds.
+/// The diary's spirit. A backend-agnostic front over the three oracle kinds.
 pub enum Oracle {
     Http(HttpOracle),
+    /// Ollama: same HTTP/SSE machinery as HttpOracle but no API key and a
+    /// local base URL. Kept as a distinct variant so startup logs are clear.
+    Ollama(HttpOracle),
     Pi(PiOracle),
 }
 
 impl Oracle {
-    /// Pick a backend from the environment and start it. HTTP if
-    /// `RIDDLE_OPENAI_KEY` is set (the zero-setup path), otherwise pi.
+    /// Pick a backend from the environment and start it.
+    ///
+    /// Priority order:
+    ///  1. `RIDDLE_OPENAI_KEY` set → OpenAI-compatible HTTP (unchanged path)
+    ///  2. `RIDDLE_OLLAMA_BASE` or `RIDDLE_OLLAMA_MODEL` set → local Ollama
+    ///  3. otherwise → pi (resident RPC process)
+    ///
     /// `remember` teaches the model the memory protocol (catalog + ⁂).
     pub fn spawn(remember: bool) -> std::io::Result<Self> {
         if std::env::var("RIDDLE_OPENAI_KEY").is_ok() {
             eprintln!("riddle: oracle = OpenAI-compatible HTTP");
             Ok(Oracle::Http(HttpOracle::new(remember)?))
+        } else if std::env::var("RIDDLE_OLLAMA_BASE").is_ok()
+            || std::env::var("RIDDLE_OLLAMA_MODEL").is_ok()
+        {
+            eprintln!("riddle: oracle = Ollama (local)");
+            Ok(Oracle::Ollama(HttpOracle::new_ollama(remember)?))
         } else {
-            eprintln!("riddle: oracle = pi (set RIDDLE_OPENAI_KEY for the HTTP backend)");
+            eprintln!("riddle: oracle = pi (set RIDDLE_OPENAI_KEY or RIDDLE_OLLAMA_MODEL for the HTTP backend)");
             Ok(Oracle::Pi(PiOracle::spawn(remember)?))
         }
     }
@@ -194,7 +207,7 @@ impl Oracle {
     /// when the reply is complete.
     pub fn ask(&self, png_path: &str, ctx: &TurnContext, tx: Sender<Result<Event, String>>) {
         match self {
-            Oracle::Http(o) => o.ask(png_path, ctx, tx),
+            Oracle::Http(o) | Oracle::Ollama(o) => o.ask(png_path, ctx, tx),
             Oracle::Pi(o) => o.ask(png_path, ctx, tx),
         }
     }
@@ -389,9 +402,12 @@ impl PiOracle {
 /// Any OpenAI-compatible chat backend. No warm process: each turn opens a
 /// streaming `/chat/completions` request on its own thread and forwards
 /// sentence-sized chunks as SSE deltas arrive.
+///
+/// `key` is `None` for keyless endpoints such as Ollama: the `Authorization`
+/// header is omitted entirely rather than sent as `Bearer `.
 pub struct HttpOracle {
-    base: String,   // e.g. https://api.openai.com/v1  (no trailing slash)
-    key: String,
+    base: String,         // e.g. https://api.openai.com/v1  (no trailing slash)
+    key: Option<String>,  // None = no auth header (Ollama, local servers)
     model: String,
     max_tokens: u32,
     reasoning: Option<String>, // "reasoning_effort" value, e.g. "low"
@@ -425,7 +441,31 @@ impl HttpOracle {
             "riddle: http oracle base={base} model={model} max_tokens={max_tokens} reasoning={}",
             reasoning.as_deref().unwrap_or("-")
         );
-        Ok(Self { base, key, model, max_tokens, reasoning, remember })
+        Ok(Self { base, key: Some(key), model, max_tokens, reasoning, remember })
+    }
+
+    /// Construct an oracle for a local Ollama instance. No API key is needed:
+    /// the Authorization header is omitted. Uses Ollama's OpenAI-compatible
+    /// `/v1/chat/completions` endpoint so the existing SSE parser works as-is.
+    ///
+    /// Configuration (all optional, defaults shown):
+    ///   `RIDDLE_OLLAMA_BASE`  — http://localhost:11434/v1
+    ///   `RIDDLE_OLLAMA_MODEL` — qwen2.5vl:7b
+    ///   `RIDDLE_OPENAI_MAX_TOKENS` — shared with the HTTP backend (default 2000)
+    pub fn new_ollama(remember: bool) -> std::io::Result<Self> {
+        let base = std::env::var("RIDDLE_OLLAMA_BASE")
+            .unwrap_or_else(|_| "http://localhost:11434/v1".to_string());
+        let base = base.trim_end_matches('/').to_string();
+        // qwen2.5vl:7b: best open-weight model for handwriting OCR + short
+        // structured replies. Override with RIDDLE_OLLAMA_MODEL.
+        let model = std::env::var("RIDDLE_OLLAMA_MODEL")
+            .unwrap_or_else(|_| "qwen2.5vl:7b".to_string());
+        let max_tokens = std::env::var("RIDDLE_OPENAI_MAX_TOKENS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2000);
+        eprintln!("riddle: ollama base={base} model={model} max_tokens={max_tokens}");
+        Ok(Self { base, key: None, model, max_tokens, reasoning: None, remember })
     }
 
     pub fn ask(&self, png_path: &str, ctx: &TurnContext, tx: Sender<Result<Event, String>>) {
@@ -497,11 +537,14 @@ impl HttpOracle {
                     json_quote(&user_text),
                     img,
                 );
-                agent
+                let req = agent
                     .post(&format!("{base}/chat/completions"))
-                    .set("Authorization", &format!("Bearer {key}"))
-                    .set("Content-Type", "application/json")
-                    .send_string(&body)
+                    .set("Content-Type", "application/json");
+                let req = match &key {
+                    Some(k) => req.set("Authorization", &format!("Bearer {k}")),
+                    None    => req,
+                };
+                req.send_string(&body)
             };
 
             let asked = std::time::Instant::now();
