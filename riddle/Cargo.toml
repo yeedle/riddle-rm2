@@ -17,6 +17,9 @@ ureq = { version = "2.10", default-features = false, features = ["tls"] }
 [features]
 # Link libquill.so (vendor e-ink engine C ABI) for full-takeover mode.
 takeover = []
+# Target the reMarkable 2 (ARMv7, i.MX7): 1404x1872 panel, Wacom digitizer,
+# 16-byte evdev events. Without it the build targets the Paper Pro (default).
+rm2 = []
 
 [profile.release]
 strip = true

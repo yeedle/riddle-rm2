@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # Stage the AppLoad bundle into dist/riddle/, ready for `remagic publish`.
 # Prereq: ./build-takeover.sh has produced the takeover binary.
+#
+# Honors $DEVICE (rmpp default, or rm2) to locate the right target dir.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BIN=target/aarch64-unknown-linux-gnu/release/riddle-takeover
-[ -f "$BIN" ] || { echo "build first: ./build-takeover.sh" >&2; exit 1; }
+DEVICE="${DEVICE:-rmpp}"
+case "$DEVICE" in
+  rm2)  TARGET=armv7-unknown-linux-gnueabihf ;;
+  rmpp) TARGET=aarch64-unknown-linux-gnu ;;
+  *)    echo "unknown DEVICE=$DEVICE (use rmpp or rm2)" >&2; exit 1 ;;
+esac
+
+BIN=target/$TARGET/release/riddle-takeover
+[ -f "$BIN" ] || { echo "build first: DEVICE=$DEVICE ./build-takeover.sh" >&2; exit 1; }
 [ -f ../quill/build/libquill.so ] || { echo "missing ../quill/build/libquill.so" >&2; exit 1; }
 
 rm -rf dist/riddle

@@ -1,6 +1,16 @@
 //! Geometry helpers. Drawing lives in surface.rs.
 
+// Panel geometry differs per device:
+//   Paper Pro (rmpp): 1620x2160
+//   reMarkable 2 (rm2): 1404x1872
+#[cfg(feature = "rm2")]
+pub const SCREEN_W: usize = 1404;
+#[cfg(feature = "rm2")]
+pub const SCREEN_H: usize = 1872;
+
+#[cfg(not(feature = "rm2"))]
 pub const SCREEN_W: usize = 1620;
+#[cfg(not(feature = "rm2"))]
 pub const SCREEN_H: usize = 2160;
 
 /// Grow-only pixel bounding box, used to build update/dissolve regions.

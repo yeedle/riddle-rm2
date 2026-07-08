@@ -150,7 +150,7 @@ fn run() -> std::io::Result<()> {
     // while you're still picking up the pen, so replies pay only model latency.
     let oracle = match oracle::Oracle::spawn() {
         Ok(o) => {
-            eprintln!("riddle: oracle warming (pi rpc)");
+            eprintln!("riddle: oracle warming");
             Some(o)
         }
         Err(e) => {
@@ -173,11 +173,17 @@ fn run() -> std::io::Result<()> {
     // This tests mixing precomposed pixel art with live pen updates.
     let mut last_footstep: Option<(i32, i32)> = None;
     let mut footstep_i: u32 = 0;
+    // Decorative "footprint" stamps beside live ink are an experiment that
+    // corrupts the committed handwriting page (the oracle then can't read it),
+    // so they are OFF by default. Set RIDDLE_FOOTSTEPS to re-enable.
+    let footsteps_enabled = std::env::var("RIDDLE_FOOTSTEPS").is_ok();
     let mut last_flush = Instant::now();
     // Takeover swaps are cheap and synchronous; qtfb needs coalescing.
     let flush_every = if takeover { Duration::from_millis(8) } else { Duration::from_millis(35) };
 
     eprintln!("riddle: the diary is open");
+    let min_pressure = pen::min_pressure();
+    eprintln!("riddle: pen min pressure = {min_pressure}");
 
     loop {
         if sigterm.load(Ordering::Relaxed) {
@@ -243,7 +249,7 @@ fn run() -> std::io::Result<()> {
         // ---- raw pen (preferred path) ----
         if let Some(ref mut pdev) = pen_dev {
             for s in pdev.drain() {
-                let writing = s.touching && s.pressure > 40;
+                let writing = s.touching && s.pressure > min_pressure;
                 stylus_on = writing;
                 stylus_tapped |= writing;
                 if !writing {
@@ -264,7 +270,7 @@ fn run() -> std::io::Result<()> {
                             pen::Tool::Pen => {
                                 let r = 2 + s.pressure * 3 / pen::MAX_PRESSURE;
                                 let mut d = user_ink.pen_point(&mut surf, s.x, s.y, r);
-                                if should_stamp_footstep(last_footstep, s.x, s.y) {
+                                if footsteps_enabled && should_stamp_footstep(last_footstep, s.x, s.y) {
                                     let f = draw_faded_footstep(&mut surf, s.x + 52, s.y - 38, footstep_i);
                                     d.add(f.x0, f.y0, 0);
                                     d.add(f.x1, f.y1, 0);
@@ -306,7 +312,7 @@ fn run() -> std::io::Result<()> {
                         pen_down = true;
                         let r = 2 + ev.d.clamp(0, 100) / 45;
                         let mut d = user_ink.pen_point(&mut surf, ev.x, ev.y, r);
-                        if should_stamp_footstep(last_footstep, ev.x, ev.y) {
+                        if footsteps_enabled && should_stamp_footstep(last_footstep, ev.x, ev.y) {
                             let f = draw_faded_footstep(&mut surf, ev.x + 52, ev.y - 38, footstep_i);
                             d.add(f.x0, f.y0, 0);
                             d.add(f.x1, f.y1, 0);

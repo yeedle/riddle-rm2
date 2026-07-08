@@ -45,6 +45,59 @@ pen. (Or install it from the **Store** app right on the tablet.)
 > risk. Not affiliated with reMarkable AS. Keep SSH access working before you
 > install anything — that is your escape hatch.
 
+## reMarkable 2 — SSH access and compatibility notes
+
+The project was built and tested on the **reMarkable Paper Pro**. Running it on a
+**reMarkable 2** is possible with some adjustments; this section covers the differences.
+
+### SSH access on reMarkable 2 (simpler than Paper Pro)
+
+Unlike the Paper Pro, the reMarkable 2 **does not require developer mode** to expose SSH
+credentials — they are visible right away:
+
+1. Open the menu (three horizontal lines, top-left corner).
+2. Go to **Settings → Help → Copyrights and licenses**.
+3. Scroll to the **GPLv3 Compliance** section at the bottom — your username (`root`),
+   password, and IP addresses are listed there.
+
+Connect over USB (the device always appears as `10.11.99.1` when plugged in):
+
+```sh
+ssh root@10.11.99.1
+```
+
+WLAN SSH is disabled by default. Once connected via USB, enable it with:
+
+```sh
+rm-ssh-over-wlan on
+```
+
+After that you can connect wirelessly using the WLAN IP shown in the same GPLv3 section.
+To copy files to the tablet (same path as Paper Pro):
+
+```sh
+scp -O -r riddle root@10.11.99.1:/home/root/xovi/exthome/appload/
+```
+
+> 💡 **Tip:** To avoid typing the password each time, copy your SSH public key to the
+> device with `ssh-copy-id root@10.11.99.1` after your first connection.
+
+### Display backend on reMarkable 2
+
+- **Windowed mode (AppLoad/qtfb)** — the recommended path for rM2.
+  [xovi + AppLoad](https://github.com/asivery/rm-appload) supports the reMarkable 2, and
+  the binary cross-compiled for `aarch64-unknown-linux-gnu` matches both devices. Build
+  normally with `cargo build --release --target aarch64-unknown-linux-gnu` and follow the
+  standard AppLoad install.
+- **Takeover mode (quill)** — depends on `libqsgepaper.so` pulled from *your own device*.
+  The vendor library exists on the reMarkable 2 but targets a different board variant; the
+  shim *may* work, but it has **not** been tested on rM2. Start with the windowed backend
+  and switch to takeover only if you need lower latency.
+
+> ⚠️ Hardware differences (display waveform tables, evdev event paths) between the
+> reMarkable 2 and the Paper Pro may still require minor tuning. Keep SSH access live as
+> your escape hatch at all times.
+
 ## How it works
 
 ```

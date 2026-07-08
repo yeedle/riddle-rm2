@@ -1,10 +1,14 @@
 #!/bin/bash
-# Cross-build quill against the ferrari SDK (OS 3.26 toolchain).
-# Prereq: ~/rm-sdk-3.26 installed; libqsgepaper.so pulled from the device into ./vendor/.
+# Cross-build quill against the device SDK.
+# Prereq: SDK installed; libqsgepaper.so pulled from the device into ./vendor/.
+#
+# Honors $SDK (default ~/rm-sdk-3.26 for Paper Pro). For reMarkable 2 pass
+# SDK=~/rm-sdk-rm2 (the ARMv7 toolchain).
 set -euo pipefail
 cd "$(dirname "$0")"
 
-SDK=~/rm-sdk-3.26
+SDK="${SDK:-~/rm-sdk-3.26}"
+SDK="${SDK/#\~/$HOME}"
 ENV=$(ls $SDK/environment-setup-* | head -n1)
 # The SDK env script sets CC/CXX with target flags and $SDKTARGETSYSROOT.
 # It refuses to load when LD_LIBRARY_PATH is set.

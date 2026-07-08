@@ -24,16 +24,21 @@ pub const FBFMT_RMPP_RGB565: u8 = 3;
 
 #[allow(dead_code)]
 pub const REFRESH_MODE_UFAST: i32 = 0;
+#[allow(dead_code)]
 pub const REFRESH_MODE_FAST: i32 = 1;
 
 // Input event types (server -> client).
+#[allow(dead_code)]
 pub const INPUT_TOUCH_PRESS: i32 = 0x10;
+#[allow(dead_code)]
 pub const INPUT_TOUCH_RELEASE: i32 = 0x11;
+#[allow(dead_code)]
 pub const INPUT_TOUCH_UPDATE: i32 = 0x12;
 pub const INPUT_PEN_PRESS: i32 = 0x20;
 pub const INPUT_PEN_RELEASE: i32 = 0x21;
 #[allow(dead_code)]
 pub const INPUT_PEN_UPDATE: i32 = 0x22;
+#[allow(dead_code)]
 pub const INPUT_VKB_PRESS: i32 = 0x40;
 #[allow(dead_code)]
 pub const INPUT_VKB_RELEASE: i32 = 0x41;
@@ -43,6 +48,7 @@ const SOCKET_PATH: &str = "/tmp/qtfb.sock";
 #[derive(Debug, Clone, Copy)]
 pub struct InputEvent {
     pub input_type: i32,
+    #[allow(dead_code)]
     pub dev_id: i32,
     pub x: i32,
     pub y: i32,
@@ -54,9 +60,12 @@ pub struct QtfbClient {
     fd: RawFd,
     shm: *mut u8,
     shm_len: usize,
+    #[allow(dead_code)]
     pub width: usize,
+    #[allow(dead_code)]
     pub height: usize,
     /// bytes per pixel
+    #[allow(dead_code)]
     pub bpp: usize,
 }
 
@@ -158,6 +167,7 @@ impl QtfbClient {
         })
     }
 
+    #[allow(dead_code)]
     pub fn raw_fd(&self) -> RawFd {
         self.fd
     }

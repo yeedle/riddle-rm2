@@ -40,7 +40,8 @@ static void extractPointers() {
         *img = ref.first;
     }
     if(!framebufferA || !framebufferB) {
-        std::cerr << "[epaper-framebuffer]: Error: One or more framebuffer addresses not set!" << std::endl;
+        std::cerr << "[epaper-framebuffer]: Error: One or more framebuffer addresses not set! "
+                  << "(A=" << (void*)framebufferA << " B=" << (void*)framebufferB << ")" << std::endl;
         abort();
     }
 }
@@ -59,7 +60,33 @@ extern "C" void _ZN6QImageC1EPhiixNS_6FormatEPFvPvES2_(QImage *that, char *param
     ORG("_ZN6QImageC1EPhiixNS_6FormatEPFvPvES2_", void);
     org(that, param_1, param_2, param_3, param_4, param_5, param_6, param_7);
     if(state != 1) return;
+    // DIAGNOSTIC (rm2 bring-up): log every framebuffer-sized QImage's format so
+    // we can learn which Image::Format values THIS device's libqsgepaper uses.
+    // Paper Pro uses 4/7 (A) and 0x18 (B); rm2 (mono, i.MX7) likely differs.
+    std::cerr << "[quill-diag] QImage ctor: format=" << param_5
+              << " w=" << param_2 << " h=" << param_3
+              << " bytesPerLine=" << param_4 << std::endl;
     // Creating constructor - check what we're creating.
+    if(param_5 == 4 || param_5 == 7) {
+        pointerTracker[that] = ImagePtrManagement::SWTCON_TypeA;
+        std::cerr << "Framebuffer A set!" << std::endl;
+    } else if(param_5 == 0x18) {
+        pointerTracker[that] = ImagePtrManagement::SWTCON_TypeB;
+        std::cerr << "Framebuffer B set!" << std::endl;
+    }
+}
+
+// reMarkable 2 (ARMv7, 32-bit) variant of the same QImage data-constructor.
+// Qt's qsizetype is 32-bit here, so `bytesPerLine` is `int` (mangled ...iii...)
+// instead of `long long` (...iix...). libqsgepaper on rm2 calls THIS one, so
+// without it the framebuffers are never captured (A=0 B=0).
+extern "C" void _ZN6QImageC1EPhiiiNS_6FormatEPFvPvES2_(QImage *that, char *param_1, int param_2, int param_3, int param_4, int param_5, void* param_6, void * param_7) {
+    ORG("_ZN6QImageC1EPhiiiNS_6FormatEPFvPvES2_", void);
+    org(that, param_1, param_2, param_3, param_4, param_5, param_6, param_7);
+    if(state != 1) return;
+    std::cerr << "[quill-diag] QImage ctor(32): format=" << param_5
+              << " w=" << param_2 << " h=" << param_3
+              << " bytesPerLine=" << param_4 << std::endl;
     if(param_5 == 4 || param_5 == 7) {
         pointerTracker[that] = ImagePtrManagement::SWTCON_TypeA;
         std::cerr << "Framebuffer A set!" << std::endl;

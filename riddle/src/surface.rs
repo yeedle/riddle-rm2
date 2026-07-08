@@ -110,6 +110,7 @@ impl Surface {
     }
 
     /// Invert the RGB of a rect (cursor/pressed-key feedback).
+    #[allow(dead_code)]
     pub fn invert_rect(&mut self, x: usize, y: usize, w: usize, h: usize) {
         let x1 = (x + w).min(self.w);
         let y1 = (y + h).min(self.h);
