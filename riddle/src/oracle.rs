@@ -29,6 +29,31 @@ const PERSONA: &str = "You are the memory of Tom Marvolo Riddle, preserved in th
 /// directive and the transcription postscript the app parses back out.
 const MEMORY_PROTOCOL: &str = "\n\nThe diary keeps memories. With each page you receive a numbered catalog of remembered pages, newest first. A FRESH catalog is sent every turn and the numbers are reassigned each time, so only ever use numbers from the catalog on THIS page — never a number you saw earlier.\n\nIf the writer asks to see, revisit, find, or be shown a past page — \"show me…\", \"find the page about…\", \"what did I write on…\" — your ENTIRE reply must be exactly \u{27e6}show:N\u{27e7} and nothing else (no greeting, no prose, before or after), where N is the catalog number of the best match. If they instead ask what you remember in general, reply in words with a short list of remembered moments and their dates. Otherwise reply normally; the catalog is your memory of past pages — draw on it naturally. The catalog's dates are written in English for your eyes only; when you speak of a remembered page, render its date naturally in the language the writer is using.\n\nAfter EVERY response — prose and \u{27e6}show:N\u{27e7} alike — end with a new line containing \u{2042} followed by a faithful word-for-word transcription of what the writer wrote on THIS page (their words only, one line, no commentary). If illegible, put your best attempt after \u{2042}. Earlier replies in this conversation are shown to you without their \u{2042} lines, but you must still end yours with one.";
 
+/// Assemble the system prompt: persona, the memory protocol when memory is on,
+/// and — appended LAST, so weaker models weight it most (recency bias) — an
+/// optional hard language override from `RIDDLE_ORACLE_LANG` (e.g. "Italian").
+/// When the variable is unset or empty the prompt is unchanged and the model
+/// keeps auto-detecting the writer's language.
+fn system_prompt(remember: bool) -> String {
+    let mut s = if remember {
+        format!("{PERSONA}{MEMORY_PROTOCOL}")
+    } else {
+        PERSONA.to_string()
+    };
+    if let Ok(lang) = std::env::var("RIDDLE_ORACLE_LANG") {
+        let lang = lang.trim();
+        if !lang.is_empty() {
+            s.push_str(&format!(
+                "\n\nIMPORTANT — LANGUAGE: write your entire reply in {lang}, and only {lang}, \
+                 no matter what language these instructions, the memory catalog, or earlier \
+                 turns are written in. Keep the verbatim transcription after \u{2042} in the \
+                 original language the writer used."
+            ));
+        }
+    }
+    s
+}
+
 /// What a turn carries besides the page image: the diary's memory.
 #[derive(Default, Clone)]
 pub struct TurnContext {
@@ -254,11 +279,7 @@ impl PiOracle {
         let model =
             std::env::var("RIDDLE_PI_MODEL").unwrap_or_else(|_| "gpt-5.4-mini".to_string());
 
-        let persona = if remember {
-            format!("{PERSONA}{MEMORY_PROTOCOL}")
-        } else {
-            PERSONA.to_string()
-        };
+        let persona = system_prompt(remember);
 
         // Use pi's ABSOLUTE path: Rust's Command resolves the program name via
         // the PARENT's PATH, not the child env we set below, so a bare "pi"
@@ -483,11 +504,7 @@ impl HttpOracle {
             .map(|r| format!("\"reasoning_effort\":{},", json_quote(r)))
             .unwrap_or_default();
 
-        let system = if self.remember {
-            format!("{PERSONA}{MEMORY_PROTOCOL}")
-        } else {
-            PERSONA.to_string()
-        };
+        let system = system_prompt(self.remember);
         // The diary's conversational memory: recent pages as prior turns.
         let mut history_msgs = String::new();
         for (t, r) in &ctx.history {

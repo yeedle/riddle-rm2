@@ -137,6 +137,7 @@ scp -O -r riddle root@10.11.99.1:/home/root/xovi/exthome/appload/
 | Write *"what do you remember?"* | Tom answers with a handwritten list of remembered moments |
 | Flip the marker | Erase |
 | Draw a large **?** | Summon the built-in guide |
+| **Plunge the pen straight down** (tall narrow stroke, top→bottom) | The diary bleeds — Tom's final scream, then the page goes white |
 | Tap five fingers at once | Leave the diary *(takeover mode)* |
 | Power button | The page turns to *"The diary sleeps."*, then the tablet suspends; press again to wake exactly where you were *(takeover mode)* |
 
@@ -260,6 +261,17 @@ with no GPU can take a couple of minutes per reply. Two knobs help:
 
 Both `ORACLE_PATIENCE` (total wait) and the oracle read timeout are 300s, so a
 slow first reply won't be abandoned prematurely.
+
+**Reply language.** By default Tom detects the language you wrote in and answers
+in kind, but weaker or local models often drift back to English. To pin every
+reply to a language, set `RIDDLE_ORACLE_LANG` to its name:
+
+```sh
+export RIDDLE_ORACLE_LANG="Italian"   # unset = automatic detection
+```
+
+The verbatim transcription of your page is kept in the language you actually
+wrote in.
 
 ### Option C — pi (the power path)
 
