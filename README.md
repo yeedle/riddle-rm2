@@ -228,6 +228,7 @@ as a grayscale PNG):
 | Model | VRAM | Notes |
 |---|---|---|
 | `qwen2.5vl:7b` *(default)* | ~6 GB | Best handwriting OCR; follows structured instructions reliably |
+| `qwen2.5vl:3b` | ~3 GB | Lighter Qwen-VL; keeps persona & OCR well, good CPU compromise |
 | `llava-llama3:8b` | ~6 GB | Solid all-round alternative |
 | `llava:13b` | ~10 GB | Stronger vision, slower |
 | `moondream` | ~2 GB | Minimal resources; weaker OCR and instruction-following |
@@ -246,6 +247,19 @@ riddle --oracle-test path/to/handwriting.png
 
 No data leaves your network. `RIDDLE_OPENAI_MAX_TOKENS` is shared with
 Option A and applies here too (default 2000).
+
+**Performance on slow / CPU-only hosts.** Vision models are heavy: a 7B model
+with no GPU can take a couple of minutes per reply. Two knobs help:
+
+- `RIDDLE_ORACLE_MAX_DIM` — long side (px) of the page image sent to the
+  oracle (default `800`). The page is already cropped to your ink and
+  downscaled; lowering this to `640` or `512` sends fewer pixels, so the model
+  answers faster, at some cost to OCR of fine handwriting.
+- Pick a lighter model — `qwen2.5vl:3b` keeps Tom's persona and OCR far better
+  than `moondream` while running roughly twice as fast as the 7B on CPU.
+
+Both `ORACLE_PATIENCE` (total wait) and the oracle read timeout are 300s, so a
+slow first reply won't be abandoned prematurely.
 
 ### Option C — pi (the power path)
 
