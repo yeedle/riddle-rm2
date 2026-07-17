@@ -178,6 +178,45 @@ fn build_ctx(store: &Option<memory::MemoryStore>) -> oracle::TurnContext {
     oracle::TurnContext { history: s.recent_dialogue(turns), catalog_lines, catalog_ids }
 }
 
+// Close button (windowed mode only): a small ✕ box in the top-right corner,
+// tappable with pen or finger. Takeover mode keeps its 5-finger quit.
+const CLOSE_BTN_S: usize = 90;
+const CLOSE_BTN_X: usize = SCREEN_W - CLOSE_BTN_S - 14;
+const CLOSE_BTN_Y: usize = 14;
+
+/// A page that is nothing but a farewell word closes the diary.
+/// Compared on letters only, so "Close." or "exit!" still count.
+fn is_close_command(t: &str) -> bool {
+    let w: String = t.trim().to_lowercase().chars().filter(|c| c.is_alphabetic()).collect();
+    matches!(w.as_str(), "close" | "exit" | "quit" | "goodbye")
+}
+
+fn in_close_button(x: i32, y: i32) -> bool {
+    x >= CLOSE_BTN_X as i32 - 10
+        && x <= (CLOSE_BTN_X + CLOSE_BTN_S) as i32 + 10
+        && y >= CLOSE_BTN_Y as i32 - 10
+        && y <= (CLOSE_BTN_Y + CLOSE_BTN_S) as i32 + 10
+}
+
+/// Repaint the ✕ if anything drew over it. Returns true when pixels changed
+/// (the caller then marks the region dirty for the next flush).
+fn draw_close_button(surf: &mut Surface) -> bool {
+    let (x, y, s) = (CLOSE_BTN_X, CLOSE_BTN_Y, CLOSE_BTN_S);
+    // Sentinel: the diagonals cross the center; skip when already inked.
+    if surf.luma((x + s / 2) as i32, (y + s / 2) as i32) < 0x60 {
+        return false;
+    }
+    let t = 3;
+    surf.fill_rect(x, y, s, t, BLACK);
+    surf.fill_rect(x, y + s - t, s, t, BLACK);
+    surf.fill_rect(x, y, t, s, BLACK);
+    surf.fill_rect(x + s - t, y, t, s, BLACK);
+    let m = 26;
+    surf.brush_line((x + m) as i32, (y + m) as i32, (x + s - m) as i32, (y + s - m) as i32, 2, BLACK);
+    surf.brush_line((x + s - m) as i32, (y + m) as i32, (x + m) as i32, (y + s - m) as i32, 2, BLACK);
+    true
+}
+
 fn run() -> std::io::Result<()> {
     let font = FontRef::try_from_slice(FONT_TTF).map_err(std::io::Error::other)?;
 
@@ -191,12 +230,23 @@ fn run() -> std::io::Result<()> {
         surf.stride
     );
 
-    let mut pen_dev = match pen::PenDevice::open() {
-        Ok(p) => Some(p),
-        Err(e) => {
-            eprintln!("riddle: raw pen unavailable ({e}), falling back to qtfb pen events");
-            None
+    // Raw evdev pen only makes sense in takeover mode (we own the panel and
+    // xochitl is stopped). Under qtfb/AppLoad the shim intercepts the digitizer
+    // and delivers pen events over the QTFB socket instead of /dev/input — so
+    // grabbing the raw device there yields NO events and, worse, the event loop
+    // skips the qtfb pen path whenever pen_dev.is_some(). Only open raw in
+    // takeover; otherwise stay None and consume qtfb INPUT_PEN_* events.
+    let mut pen_dev = if takeover {
+        match pen::PenDevice::open() {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("riddle: raw pen unavailable ({e}), falling back to qtfb pen events");
+                None
+            }
         }
+    } else {
+        eprintln!("riddle: qtfb mode — using QTFB socket pen events");
+        None
     };
     // Takeover mode: touch is ours too; 5-finger tap = quit.
     let mut touch_dev = if takeover { touch::TouchDevice::open().ok() } else { None };
@@ -264,13 +314,16 @@ fn run() -> std::io::Result<()> {
     let footsteps_enabled = std::env::var("RIDDLE_FOOTSTEPS").is_ok();
     let mut last_flush = Instant::now();
     // Takeover swaps are cheap and synchronous; qtfb needs coalescing.
-    let flush_every = if takeover { Duration::from_millis(8) } else { Duration::from_millis(35) };
+    // qtfb needs coalescing (each update is an IPC round-trip to the shim);
+    // 20ms (~50 Hz) keeps the stroke continuous without flooding the socket.
+    // Takeover writes straight to the panel and can afford 8ms.
+    let flush_every = if takeover { Duration::from_millis(8) } else { Duration::from_millis(10) };
 
     eprintln!("riddle: the diary is open");
     let min_pressure = pen::min_pressure();
     eprintln!("riddle: pen min pressure = {min_pressure}");
 
-    loop {
+    'main: loop {
         if sigterm.load(Ordering::Relaxed) {
             break;
         }
@@ -389,6 +442,15 @@ fn run() -> std::io::Result<()> {
                 continue;
             }
             match ev.input_type {
+                // Visible close button (qtfb/AppLoad only): a pen or finger
+                // tap on the ✕ box in the top-right corner closes the diary.
+                // Takeover mode uses the 5-finger tap instead.
+                qtfb::INPUT_TOUCH_PRESS | qtfb::INPUT_PEN_PRESS
+                    if in_close_button(ev.x, ev.y) =>
+                {
+                    eprintln!("riddle: close button tapped");
+                    break 'main;
+                }
                 qtfb::INPUT_PEN_PRESS | qtfb::INPUT_PEN_UPDATE => {
                     stylus_on = true;
                     stylus_tapped = true;
@@ -424,6 +486,12 @@ fn run() -> std::io::Result<()> {
                 }
                 _ => {}
             }
+        }
+
+        // ---- keep the close button visible (windowed mode) ----
+        if !takeover && draw_close_button(&mut surf) {
+            ink_dirty.add(CLOSE_BTN_X as i32, CLOSE_BTN_Y as i32, 2);
+            ink_dirty.add((CLOSE_BTN_X + CLOSE_BTN_S) as i32, (CLOSE_BTN_Y + CLOSE_BTN_S) as i32, 2);
         }
 
         // ---- coalesced ink flush ----
@@ -500,6 +568,9 @@ fn run() -> std::io::Result<()> {
                     disp.update(x, y, w, h, true);
                     if stage + 1 >= STAGES {
                         user_ink.clear();
+                        // One high-quality pass over the drunk region so no
+                        // pale remnants of the handwriting survive the fade.
+                        disp.deghost(x, y, w, h);
                         State::Thinking { rx, pulse: Instant::now(), blot_on: false, since: Instant::now() }
                     } else {
                         State::Drinking { stage: stage + 1, next: Instant::now() + Duration::from_millis(70), region, rx }
@@ -535,6 +606,10 @@ fn run() -> std::io::Result<()> {
                             State::Replying { plan, next: Instant::now(), rx: Some(rx) }
                         }
                         Ok(Event::Transcript(t)) => {
+                            if is_close_command(&t) {
+                                eprintln!("riddle: farewell written — closing");
+                                break 'main;
+                            }
                             // Transcript with no prose (model skipped the
                             // reply): remember the words, keep waiting.
                             turn_transcript = Some(t);
@@ -592,6 +667,10 @@ fn run() -> std::io::Result<()> {
                             }
                         }
                         Ok(Ok(Event::Transcript(t))) => {
+                            if is_close_command(&t) {
+                                eprintln!("riddle: farewell written — closing");
+                                break 'main;
+                            }
                             turn_transcript = Some(t);
                             false // the disconnect is still coming
                         }
@@ -652,6 +731,10 @@ fn run() -> std::io::Result<()> {
                         let chars: usize = plan.strokes.iter().map(|s| s.len()).sum();
                         let linger = Duration::from_millis(4000 + (chars as u64) * 2);
                         let region = plan.region;
+                        // Tom has finished writing: re-render his ink with the
+                        // quality waveform — UFAST leaves dithering blotches.
+                        let (rx_, ry, rw, rh) = region.rect();
+                        disp.deghost(rx_, ry, rw, rh);
                         State::Lingering { until: Instant::now() + linger.min(Duration::from_secs(20)), region }
                     } else {
                         State::Replying { plan, next: Instant::now() + Duration::from_millis(14), rx }

@@ -3,14 +3,19 @@
 // Panel geometry differs per device:
 //   Paper Pro (rmpp): 1620x2160
 //   reMarkable 2 (rm2): 1404x1872
-#[cfg(feature = "rm2")]
+//
+// The rm2 dimensions only apply in TAKEOVER mode, where we drive the real
+// panel. In windowed mode the AppLoad/qtfb shim always presents an
+// RMPP-sized 1620x2160 canvas and scales it to the device screen — pen and
+// touch events arrive in that space too, on every device.
+#[cfg(all(feature = "rm2", feature = "takeover"))]
 pub const SCREEN_W: usize = 1404;
-#[cfg(feature = "rm2")]
+#[cfg(all(feature = "rm2", feature = "takeover"))]
 pub const SCREEN_H: usize = 1872;
 
-#[cfg(not(feature = "rm2"))]
+#[cfg(not(all(feature = "rm2", feature = "takeover")))]
 pub const SCREEN_W: usize = 1620;
-#[cfg(not(feature = "rm2"))]
+#[cfg(not(all(feature = "rm2", feature = "takeover")))]
 pub const SCREEN_H: usize = 2160;
 
 /// Grow-only pixel bounding box, used to build update/dissolve regions.

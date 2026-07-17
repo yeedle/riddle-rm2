@@ -101,6 +101,20 @@ impl Display {
         let _ = (w, h);
     }
 
+    /// Re-render a region with the high-quality waveform, then return to the
+    /// low-latency one. Clears UFAST dithering blotches and fade remnants
+    /// without the full-screen flash.
+    pub fn deghost(&self, x: i32, y: i32, w: i32, h: i32) {
+        match self {
+            Display::Qtfb(c) => {
+                let _ = c.set_refresh_mode(crate::qtfb::REFRESH_MODE_CONTENT);
+                let _ = c.update_partial(x, y, w, h);
+                let _ = c.set_refresh_mode(crate::qtfb::REFRESH_MODE_UFAST);
+            }
+            Display::Quill => self.update(x, y, w, h, false),
+        }
+    }
+
     /// Flashing clear of the whole panel (ghost removal).
     pub fn full_refresh(&self, w: usize, h: usize) {
         match self {

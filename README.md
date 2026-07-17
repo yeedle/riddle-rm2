@@ -85,21 +85,110 @@ scp -O -r riddle root@10.11.99.1:/home/root/xovi/exthome/appload/
 > 💡 **Tip:** To avoid typing the password each time, copy your SSH public key to the
 > device with `ssh-copy-id root@10.11.99.1` after your first connection.
 
+### Prerequisites on the reMarkable 2
+
+- **OS 3.9 or newer — 3.27.x recommended.** Older OS versions (≤3.8) ship Qt 5;
+  xovi's extensions target Qt 6 and silently do nothing on Qt 5. Update the
+  tablet first (Settings → General → Software update; it may step through
+  intermediate versions — keep updating until none are offered).
+- **xovi + AppLoad** installed:
+  1. `xovi-arm32.tar.gz` from [rm-xovi-extensions releases](https://github.com/asivery/rm-xovi-extensions/releases)
+     extracted to `/home/root/` (gives `/home/root/xovi/` with `qt-resource-rebuilder.so`).
+  2. `appload.so` from the arm32 zip of [rm-appload releases](https://github.com/asivery/rm-appload/releases)
+     into `/home/root/xovi/extensions.d/`; the two `qtfb-shim*.so` files into `/home/root/shims/`.
+  3. Build the hashtable: `/home/root/xovi/rebuild_hashtable` (takes a couple of
+     minutes; the tablet must not sleep — press power if it does).
+  4. `/home/root/xovi/start` — an **AppLoad** entry appears in the xochitl menu.
+
 ### Display backend on reMarkable 2
 
-- **Windowed mode (AppLoad/qtfb)** — the recommended path for rM2.
-  [xovi + AppLoad](https://github.com/asivery/rm-appload) supports the reMarkable 2, and
-  the binary cross-compiled for `aarch64-unknown-linux-gnu` matches both devices. Build
-  normally with `cargo build --release --target aarch64-unknown-linux-gnu` and follow the
-  standard AppLoad install.
+- **Windowed mode (AppLoad/qtfb)** — the recommended path, and what this fork
+  targets. The rM2 is 32-bit: build for **`armv7-unknown-linux-gnueabihf`**
+  with the `rm2` feature. From any machine with Docker:
+
+  ```sh
+  docker run --rm -v "$PWD":/work -w /work/riddle rust:1-bullseye bash -c '
+    apt-get update -qq && apt-get install -y -qq gcc-arm-linux-gnueabihf
+    rustup target add armv7-unknown-linux-gnueabihf
+    export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
+    cargo build --release --target armv7-unknown-linux-gnueabihf --features rm2'
+  ```
+
+  Then stage an app folder and copy it over (`killall riddle` on the tablet
+  first if it is running — otherwise scp fails with "Text file busy"):
+
+  ```
+  riddle/                       -> /home/root/xovi/exthome/appload/riddle/
+  |- riddle                        the armv7 binary (chmod +x)
+  |- riddle-start.sh               launcher: sources oracle.env, execs riddle
+  |- external.manifest.json        "application": "riddle-start.sh", "qtfb": true
+  |- oracle.env                    your API key + settings (see oracle.env.example)
+  |- icon.png
+  ```
+
+  `riddle-start.sh` matters: the binary does **not** read `oracle.env` itself —
+  the launcher must source it (`set -a; . ./oracle.env; set +a; exec ./riddle`).
+  In AppLoad tap **Reload**, then **The Diary**.
+
 - **Takeover mode (quill)** — depends on `libqsgepaper.so` pulled from *your own device*.
   The vendor library exists on the reMarkable 2 but targets a different board variant; the
   shim *may* work, but it has **not** been tested on rM2. Start with the windowed backend
   and switch to takeover only if you need lower latency.
 
-> ⚠️ Hardware differences (display waveform tables, evdev event paths) between the
-> reMarkable 2 and the Paper Pro may still require minor tuning. Keep SSH access live as
-> your escape hatch at all times.
+> ⚠️ Keep SSH access live as your escape hatch at all times. If the UI ever
+> wedges: `ssh root@10.11.99.1 'systemctl restart xochitl'`.
+
+### Closing the diary (windowed mode)
+
+Three ways out:
+
+- Tap the **✕ button** in the top-right corner — pen or finger.
+- Write **close**, **exit**, **quit**, or **goodbye** as the only word on the
+  page and rest the pen (the diary confirms via the transcription, so this one
+  takes an oracle round-trip).
+- From a terminal: `killall riddle`.
+
+### Personalizing the writer (any device)
+
+Set `RIDDLE_PERSONA_EXTRA` in `oracle.env` to append to Tom's system prompt
+without rebuilding — the writer's name, age, tone limits, anything:
+
+```sh
+RIDDLE_PERSONA_EXTRA="The writer's name is Leah, age 10 … keep it kind."
+```
+
+### Resetting the conversation
+
+`rm -rf /home/root/riddle-data/memories` (with the diary closed) makes the
+diary forget everything.
+
+### Material changes in this fork (vs upstream riddle)
+
+- **PR [#19](https://github.com/MaximeRivest/riddle/pull/19) applied** — required
+  for windowed mode on rM2: the 32-bit AppLoad shim lays out its `ServerMessage`
+  with data at offset 4 (not 8), so the old code read a garbage SHM key and died
+  on launch with `fatal: No such file or directory`; input-event offsets had the
+  same bug (garbage pen coordinates); raw evdev pen is now only opened in
+  takeover mode (under qtfb the shim owns the digitizer).
+- **Full-canvas geometry in windowed mode** — the qtfb shim always presents a
+  1620×2160 (Paper-Pro-size) canvas scaled to the device screen, on every
+  device. The 1404×1872 rM2 dimensions now apply only to `rm2`+`takeover`
+  builds; previously the windowed build left a dead margin on the right/bottom
+  where ink was neither committed nor faded.
+- **Visible ✕ close button** (windowed mode), tappable with pen or finger; the
+  old corner-tap gesture had a `break` that never actually exited the app.
+- **Written farewells** — `close` / `exit` / `quit` / `goodbye` as the only
+  word on the page closes the diary.
+- **E-ink cleanup passes** — live ink stays on the fast waveform, but the
+  drink-fade and Tom's finished replies each get one high-quality (GC16)
+  re-render (`Display::deghost`): no more pale handwriting remnants after the
+  fade, no more dithering blotches in the reply text.
+- **`RIDDLE_PERSONA_EXTRA`** env hook (see above).
+- **Font** — replies render in [Patrick Hand](https://fonts.google.com/specimen/Patrick+Hand)
+  (print-style, child-readable) instead of Dancing Script; the font is embedded
+  at build time (`riddle/fonts/DancingScript.ttf` was replaced in place, the
+  original kept as `.orig` — swap the file and rebuild to change it).
+- **qtfb flush interval** 20 ms → 10 ms.
 
 ## How it works
 

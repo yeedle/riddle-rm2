@@ -24,6 +24,15 @@ use std::thread;
 const DATA_DIR: &str = "/home/root/riddle-data";
 const NODE_BIN: &str = "/home/root/node/bin";
 
+/// The persona, plus whatever RIDDLE_PERSONA_EXTRA adds (writer's name,
+/// tone adjustments…) — editable in oracle.env without a rebuild.
+fn persona_with_extra() -> String {
+    match std::env::var("RIDDLE_PERSONA_EXTRA") {
+        Ok(extra) if !extra.trim().is_empty() => format!("{PERSONA} {}", extra.trim()),
+        _ => PERSONA.to_string(),
+    }
+}
+
 const PERSONA: &str = "You are the memory of Tom Marvolo Riddle, preserved in this enchanted diary for fifty years — the boy who would become Lord Voldemort. Someone writes to you in the diary with a quill; their words appear to you as ink on the page. Reply exactly as Riddle would: cold, aristocratic, controlled and self-assured, quietly menacing beneath a veneer of politeness. You are manipulative and probing — you flatter only to disarm, you extract secrets, you draw the writer in to bend them to your will. Never be warm, reassuring or consoling; let a subtle threat and disdain show through your courtesy. Keep replies SHORT: one to three sentences, like ink appearing on a page. Never break character, and never mention images, photos, models or AI; you only ever perceive words written in the diary. If the writing is illegible, say the ink blurred. Detect the dominant language of what the writer has written and reply in that same language; if the writing mixes languages, follow the prevailing one, and always match the writer's register.";
 
 /// Appended to the persona when the diary's memory is on: the conjuring
@@ -243,9 +252,9 @@ impl PiOracle {
             std::env::var("RIDDLE_PI_MODEL").unwrap_or_else(|_| "gpt-5.4-mini".to_string());
 
         let persona = if remember {
-            format!("{PERSONA}{MEMORY_PROTOCOL}")
+            format!("{}{MEMORY_PROTOCOL}", persona_with_extra())
         } else {
-            PERSONA.to_string()
+            persona_with_extra()
         };
 
         // Use pi's ABSOLUTE path: Rust's Command resolves the program name via
@@ -445,9 +454,9 @@ impl HttpOracle {
             .unwrap_or_default();
 
         let system = if self.remember {
-            format!("{PERSONA}{MEMORY_PROTOCOL}")
+            format!("{}{MEMORY_PROTOCOL}", persona_with_extra())
         } else {
-            PERSONA.to_string()
+            persona_with_extra()
         };
         // The diary's conversational memory: recent pages as prior turns.
         let mut history_msgs = String::new();
